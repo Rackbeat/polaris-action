@@ -8,7 +8,7 @@ class PolarisResults:
     new_issues = 0
     job_status = None
     json_data = None
-    file_location = '.synopsys/polaris/cli-scan.json'
+    file_location = '.blackduck/polaris/cli-scan.json'
     summary_url = None
 
     def __load_file(self):
