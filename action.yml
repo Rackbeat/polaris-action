@@ -28,7 +28,7 @@ runs:
   using: "composite"
   steps: 
   - name: Downloading polaris_cli
-    run: wget -q ${{ inputs.server_url}}/api/tools/polaris_cli-linux64.zip
+    run: wget -q ${{ inputs.server_url}}/api/tools/v2/downloads/polaris_cli-linux64-2026.6.0.zip
     shell: bash
   - name: Extracting polaris_cli-linux64.zip to tmp
     run: unzip -j polaris_cli-linux64.zip -d /tmp
