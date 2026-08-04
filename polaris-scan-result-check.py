@@ -2,58 +2,89 @@
 import json
 import sys
 
+# Default output location for the Polaris CLI. Renamed from '.synopsys/polaris/'
+# when Synopsys became Black Duck; callers should pass the path explicitly via
+# the cli_scan_json_file action input rather than relying on this.
+DEFAULT_CLI_SCAN_JSON = '.blackduck/polaris/cli-scan.json'
+
 
 class PolarisResults:
     total_issues = 0
     new_issues = 0
     job_status = None
     json_data = None
-    file_location = '.blackduck/polaris/cli-scan.json'
+    file_location = DEFAULT_CLI_SCAN_JSON
     summary_url = None
 
     def __load_file(self):
         try:
-            f = open(self.file_location, mode='r')
-            self.json_data = json.load(f)
+            with open(self.file_location, mode='r') as f:
+                self.json_data = json.load(f)
         except FileNotFoundError:
             print('Cannot find file:{0}'.format(self.file_location))
             sys.exit(1)
         except json.JSONDecodeError as e:
             print('Cannot parse json data. Reason:{0}'.format(e.msg))
             sys.exit(2)
-        finally:
-            f.close()
+
+    def __describe_keys(self, obj):
+        """Report the keys actually present, so a schema change is diagnosable
+        from the build log instead of only showing which key we expected."""
+        if isinstance(obj, dict):
+            return 'keys present: {0}'.format(sorted(obj.keys()))
+        return 'expected an object, got {0}'.format(type(obj).__name__)
+
+    def __resolve_new_issues(self, issue_summary):
+        """Return the count of newly-introduced issues from the issueSummary block.
+
+        Absence is treated as 0 rather than a hard failure. 'newIssues' is not in
+        the documented cli-scan.json model (IssueSummaryV1/CliScanV2 define only
+        issuesBySeverity, summaryUrl and total), so exiting non-zero here would
+        risk a permanently-red check on a schema we do not control -- which is the
+        failure mode this commit exists to fix. total_issues gating is unaffected,
+        and the warning makes an inactive gate visible in the build log.
+        """
+        if "newIssues" in issue_summary:
+            return int(issue_summary["newIssues"])
+
+        print("WARNING: no 'newIssues' in issueSummary; new-issue gating is "
+              "INACTIVE for this scan ({0})".format(self.__describe_keys(issue_summary)))
+        return 0
 
     def __validate_set_required_fields(self):
         if "tools" not in self.json_data:
-            print("missing 'tools' section from json output")
+            print("missing 'tools' section from json output ({0})".format(
+                self.__describe_keys(self.json_data)))
             sys.exit(3)
 
         if "jobStatus" in self.json_data['tools'][0]:
             self.job_status = self.json_data['tools'][0]['jobStatus']
         else:
-            print("missing {'tools': ['jobStatus']} from json output cannot determine result of scan")
+            print("missing {'tools': ['jobStatus']} from json output cannot determine result of scan ({0})".format(
+                self.__describe_keys(self.json_data['tools'][0])))
             sys.exit(4)
 
         if "issueSummary" not in self.json_data:
-            print("missing {'issueSummary'} from json output and cannot determine if new issues have been created")
+            print("missing {'issueSummary'} from json output and cannot determine if new issues have been created ({0})".format(
+                self.__describe_keys(self.json_data)))
             sys.exit(5)
 
-        if "total" in self.json_data['issueSummary']:
-            self.total_issues = int(self.json_data['issueSummary']['total'])
+        issue_summary = self.json_data['issueSummary']
+
+        if "total" in issue_summary:
+            self.total_issues = int(issue_summary['total'])
         else:
-            print("missing {'issueSummary': {'total'} from json output")
+            print("missing {{'issueSummary': {{'total'}} from json output ({0})".format(
+                self.__describe_keys(issue_summary)))
             sys.exit(6)
 
-        if "newIssues" in self.json_data['issueSummary']:
-            self.new_issues = int(self.json_data['issueSummary']['newIssues'])
+        self.new_issues = self.__resolve_new_issues(issue_summary)
+
+        if "summaryUrl" in issue_summary:
+            self.summary_url = issue_summary['summaryUrl']
         else:
-            print("missing {'issueSummary'}")
-            sys.exit(7)
-        if "summaryUrl" in self.json_data['issueSummary']:
-            self.summary_url = self.json_data['issueSummary']['summaryUrl']
-        else:
-            print("missing {'issueSummary': {'summaryURL'}}")
+            print("missing {{'issueSummary': {{'summaryURL'}}}} ({0})".format(
+                self.__describe_keys(issue_summary)))
             sys.exit(8)
 
     def __init__(self, file_location):
@@ -71,7 +102,7 @@ if __name__ == "__main__":
     user_total_issues = int(sys.argv[2])
     user_new_issues = int(sys.argv[3])
 
-    results = PolarisResults('.synopsys/polaris/cli-scan.json')
+    results = PolarisResults(user_file_location)
     if results.job_status != "COMPLETED":
         print("The scan job has not completed successfully. Status: {0}".format(results.job_status))
         sys.exit(10)
@@ -81,12 +112,12 @@ if __name__ == "__main__":
         print("{0} new issues discovered these should be fixed before continuing.".format(results.new_issues))
         sys.exit(5)
     # check we do not have too many new issues
-    elif results.new_issues > user_new_issues & user_new_issues != 0:
+    elif results.new_issues > user_new_issues and user_new_issues != 0:
         print("There are too many new issues. New issues detected: {0} threshold {1}"
               .format(results.new_issues, user_new_issues))
         sys.exit(20)
     # check we have not breached the total number of issues.
-    elif results.total_issues > user_total_issues & user_total_issues != 0:
+    elif results.total_issues > user_total_issues and user_total_issues != 0:
         print("The threshold for total issues has been reached:{0} threshold {1}"
               .format(results.total_issues, user_total_issues))
         sys.exit(30)
