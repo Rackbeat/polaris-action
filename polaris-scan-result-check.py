@@ -71,7 +71,7 @@ if __name__ == "__main__":
     user_total_issues = int(sys.argv[2])
     user_new_issues = int(sys.argv[3])
 
-    results = PolarisResults('.synopsys/polaris/cli-scan.json')
+    results = PolarisResults(user_file_location)
     if results.job_status != "COMPLETED":
         print("The scan job has not completed successfully. Status: {0}".format(results.job_status))
         sys.exit(10)
